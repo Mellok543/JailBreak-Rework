@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
@@ -31,8 +31,10 @@ public class JailBreak : BasePlugin
     private LRGamesFactory _lrGamesFactory;
     private LRGameController _lrGameController;
     private GameDaysController _gameDaysController;
+    private CtAccessService _ctAccessService;
 
     private Timer? _muteTimer;
+    private bool _lrAvailableAnnounced;
 
     public JailBreak(IServiceProvider serviceProvider)
     {
@@ -48,6 +50,7 @@ public class JailBreak : BasePlugin
         _lrGameController = _serviceProvider.GetRequiredService<LRGameController>();
 
         _gameDaysController = _serviceProvider.GetRequiredService<GameDaysController>();
+        _ctAccessService = _serviceProvider.GetRequiredService<CtAccessService>();
 
         _menusManager.RegisterMenu(typeof(GameDay), "Игровые дни",
             ((controller, menuItem, type) => { menuItem.InternalSelect(controller); }));
@@ -78,9 +81,15 @@ public class JailBreak : BasePlugin
                 ResetCommander();
             }
 
-            if (Utilities.GetPlayers().Count(player => player.Team == CsTeam.Terrorist) <= 2)
+            if (Utilities.GetPlayers().Count(p => p.Team == CsTeam.Terrorist && p.PawnIsAlive) <= 2)
             {
                 Server.ExecuteCommand("css_vip_enable false");
+
+                if (!_lrAvailableAnnounced)
+                {
+                    _lrAvailableAnnounced = true;
+                    AnnounceLrAvailable();
+                }
             }
 
             return HookResult.Continue;
@@ -104,6 +113,7 @@ public class JailBreak : BasePlugin
         }
 
         Commander = null;
+        _lrAvailableAnnounced = false;
 
         Server.PrintToChatAll("Голосовой чат для Т отключен на 30 секунд");
         foreach (var player in Utilities.GetPlayers())
@@ -158,6 +168,13 @@ public class JailBreak : BasePlugin
         }
 
         return HookResult.Continue;
+    }
+
+
+    [ConsoleCommand("css_ct")]
+    public void OnCtAccessCommand(CCSPlayerController? player, CommandInfo commandInfo)
+    {
+        _ctAccessService.HandleCtCommand(player);
     }
 
     [ConsoleCommand("css_w")]
@@ -225,6 +242,32 @@ public class JailBreak : BasePlugin
         MenuManager.CloseActiveMenu(Commander);
 
         Commander = null;
+    }
+
+
+    private void AnnounceLrAvailable()
+    {
+        Server.PrintToChatAll("LR доступен! Все игроки получают бессмертие на 3 секунды.");
+
+        var protectedPlayers = Utilities.GetPlayers()
+            .Where(player => player.IsLegal() && player.PawnIsAlive)
+            .ToList();
+
+        foreach (var player in protectedPlayers)
+        {
+            player.PlayerPawn.Value!.TakesDamage = false;
+        }
+
+        AddTimer(3.0f, () =>
+        {
+            foreach (var player in protectedPlayers)
+            {
+                if (!player.IsLegal() || !player.PawnIsAlive)
+                    continue;
+
+                player.PlayerPawn.Value!.TakesDamage = true;
+            }
+        });
     }
 
     [ConsoleCommand("css_lr")]
